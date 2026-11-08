@@ -11,7 +11,8 @@ everything you create, so work in their app instead of decoding files or plottin
 ## Start
 
 1. `list_instances`. None running: `launch` (it starts PlotJuggler and waits). Several: ask the user
-   which one, then `select_instance`.
+   which one, then `select_instance`. A window the user started is listed unless they turned agent
+   access off (Preferences → Appearance); then ask them to turn it on, or `launch` a separate one.
 2. `get_status`: loaded datasets, time range, your tabs, and whether the user has a dialog open.
 3. Data not loaded yet: `open_file` with the path. Loader defaults load everything with no dialog;
    pass `config` to choose topics, or `ask_user: true` when the user should pick in the loader dialog
@@ -29,7 +30,8 @@ executable. With Codex on Linux, `launch` needs the display variables (the plugi
 ## Find and read data
 
 - `list_topics` (with `filter`) and `describe_topic` find paths. A unique suffix of a path resolves;
-  an ambiguous one comes back with the candidates. Do not re-verify paths you were just given.
+  an ambiguous one comes back with the candidates. When several datasets hold the same path, name
+  one as `dataset:topic/field`. Do not re-verify paths you were just given.
 - `read_series`: `stats` for a summary, `buckets` (min/max per bucket) for the shape of a long
   signal, `raw` for samples inside a window you set. Compare channels in ONE call.
 - `evaluate`: compute something (scalar series or objects: point clouds, images, TF) without
@@ -38,27 +40,24 @@ executable. With Codex on Linux, `launch` needs the display variables (the plugi
   does not fit a script.
 - Never invent values: read them.
 
-Overlap: `list_catalog`, `get_values` and `statistics` predate the tools above and do the same job;
-prefer `list_topics`, `read_series` and `evaluate`.
-
 ## Create things the user keeps
 
 All of these appear under **Custom Topics** (bottom-left), are saved with the layout, are untouched
 by the user's undo, and are yours to remove (`list_created`, `remove_derived_series`,
-`remove_markers`, `remove_script_series`).
+`remove_markers`, `remove_script_series`). A removal is refused while the user (or a plugin) has
+built a series on yours, since it would go too: tell the user instead of working around it.
 
-- `create_derived_series`: a live Luau transform over one or more inputs (Luau only). It refuses
-  inputs that share no timestamps.
-- `add_script_series`: the same in Luau **or Python**. Multi-input joins on equal timestamps
-  and does NOT check that they overlap: inputs from different messages at different rates give an
-  empty series. Fields of one message always share timestamps.
+- `create_derived_series`: a live Luau transform over one or more inputs. Several inputs join on
+  equal timestamps, so inputs that share none (different messages at different rates) are refused;
+  fields of one message always share timestamps.
+- `add_script_series`: the same in Luau **or Python**.
 - `add_filter`: one of the built-in filters (derivative, integral, moving average, ...).
 - `create_markers`: threshold or rule markers on the timeline.
 - `create_derived_object`: live object (recomputes with the playhead), or `pin_at_s` to freeze one
   instant as a finding.
 
 Python script for `add_script_series` (first line is mandatory; only `math`, `cmath`, `statistics`
-import). Name series with letters, digits and `_`:
+import):
 
 ```python
 # pj-script: python
@@ -73,8 +72,8 @@ class T:
 
 ## Show it
 
-- `plot_tab` (create/add/remove/zoom/close/list) and `scene_view` (3D/2D) open tabs that are
-  YOURS, badge-marked. You cannot see, draw in or close the user's tabs: when asked to change one,
+- `plot_tab` (create/add/remove/zoom/close/list; zoom frames the one tab you name) and `scene_view`
+  (3D/2D) open tabs that are YOURS, badge-marked. You cannot see, draw in or close the user's tabs: when asked to change one,
   say so and offer to show the same thing in a tab of yours.
 - `playback` moves the one time cursor every plot shares; move it only when it helps.
 - Times are display-axis seconds (the numbers on the plot X axes and in `get_status`).
