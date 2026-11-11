@@ -7,8 +7,10 @@ this relay on 127.0.0.1 and long-polls it; the agent talks MCP to the relay over
 standard library only: nothing to install. One relay per agent session.
 
 Page protocol (PlotJuggler's McpBrowserLink, docs/MCP_SERVER.md "Browser relay"). Every request
-carries `X-PJ-Link: <SECRET>`, a random secret only `launch` hands out (in the page URL it opens:
-?mcp=<relay>/?key=<SECRET>), so no other local process or page can join as a PlotJuggler page. Being
+carries `X-PJ-Link: <SECRET>`, a random secret `launch` hands out in the page URL it opens
+(?mcp=<relay>/?key=<SECRET>), kept in the user's cache (mode 0600) so tabs survive a relay restart. Pages and
+processes without it cannot join as PlotJuggler. The secret is as private as that URL: it is in the browser's
+history and command line and reaches the app's server in the query, and it is only good against this loopback relay. Being
 a custom header it also makes a browser ask first (CORS preflight), answered only for ALLOWED_ORIGINS.
 
   POST /link/hello {"title", "protocol", "browser"} -> {"id"}      a page joins (one instance)
@@ -49,7 +51,33 @@ def origin_of(url):
     return f"{parts.scheme}://{parts.netloc}"
 
 
-SECRET = os.environ.get("PJ_RELAY_KEY") or secrets.token_urlsafe(24)  # PJ_RELAY_KEY: tests only
+
+
+def relay_key():
+    """The secret pages must send. Kept (mode 0600) across runs, so a tab outlives a relay restart: the new run
+    answers it 404 and it says hello again. PJ_RELAY_KEY overrides it (tests)."""
+    if os.environ.get("PJ_RELAY_KEY"):
+        return os.environ["PJ_RELAY_KEY"]
+    path = CACHED_TOOLS.parent / "relay-key"
+    try:
+        key = path.read_text().strip()
+        if len(key) >= 32:
+            return key
+    except OSError:
+        pass
+    key = secrets.token_urlsafe(24)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(key)
+        os.chmod(path, 0o600)
+    except OSError as e:
+        print("pj_mcp_relay: cannot keep the relay key, tabs will not survive a restart:", e, file=sys.stderr)
+    return key
+
+
+SECRET = relay_key()
 ALLOWED_ORIGINS = {origin_of(WASM_URL), "https://app.plotjuggler.io"} | {
     o.strip().rstrip("/") for o in os.environ.get("PJ_RELAY_ORIGINS", "").split(",") if o.strip()
 }
@@ -447,7 +475,7 @@ def handle(line):
     except ValueError:
         return {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "parse error"}}
     if not isinstance(message, dict) or not isinstance(message.get("method"), str):
-        known_id = message.get("id") if isinstance(message, dict) and isinstance(message.get("id"), (str, int)) else None
+        known_id = message.get("id") if isinstance(message, dict) and isinstance(message.get("id"), (str, int)) and not isinstance(message.get("id"), bool) else None
         return {"jsonrpc": "2.0", "id": known_id, "error": {"code": -32600, "message": "invalid request"}}
     if "id" not in message:
         return None  # a notification
@@ -509,13 +537,17 @@ def main():
     # stdout is the MCP channel: keep it for replies only, and send fd 1 to stderr, so a child that
     # inherits it (the browser webbrowser.open starts, "Opening in existing browser session.") cannot
     # write into the protocol. UTF-8 both ways: Windows pipes default to the ANSI code page.
+    # Likewise stdin: a console browser (w3m, lynx: what webbrowser picks without a display) would read the agent's input.
     MCP_OUT = os.fdopen(os.dup(sys.stdout.fileno()), "w", encoding="utf-8", newline="\n")
     os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
-    sys.stdin.reconfigure(encoding="utf-8")
+    mcp_in = os.fdopen(os.dup(sys.stdin.fileno()), encoding="utf-8")
+    devnull = os.open(os.devnull, os.O_RDONLY)
+    os.dup2(devnull, sys.stdin.fileno())
+    os.close(devnull)
     if not listen():
         return 1
     # A call may wait minutes (an import, the user's dialog): each one gets its own thread.
-    for line in sys.stdin:
+    for line in mcp_in:
         if line.strip():
             threading.Thread(target=answer, args=(line,), daemon=True).start()
     return 0

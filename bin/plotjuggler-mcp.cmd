@@ -18,10 +18,10 @@ set "EXE=%ProgramFiles%\PlotJuggler4\bin\PlotJuggler4.exe"
 if exist "%EXE%" goto run
 :browser
 set "RELAY=%~dp0..\relay\pj_mcp_relay.py"
-rem Probe with -c first: a bare `python` may be the Microsoft Store stub, which only opens the Store.
-py -3 -c "" >nul 2>nul
+rem Probe first: a bare `python` may be the Microsoft Store stub, which only opens the Store; the relay needs 3.8.
+py -3 -c "import sys; sys.exit(sys.version_info < (3, 8))" >nul 2>nul
 if not errorlevel 1 goto py
-python -c "" >nul 2>nul
+python -c "import sys; sys.exit(sys.version_info < (3, 8))" >nul 2>nul
 if not errorlevel 1 goto python
 echo PlotJuggler 4 not found, and no Python for the browser version. Install PlotJuggler from https://plotjuggler.io and start it once, set PLOTJUGGLER4, or install Python 3. 1>&2
 exit /b 1

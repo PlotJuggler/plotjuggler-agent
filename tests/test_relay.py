@@ -86,8 +86,8 @@ class RelayTest(unittest.TestCase):
             e.close()
             return e.code, None, e.headers
 
-    def hello(self):
-        status, body, _ = self.http("POST", "/link/hello", {"title": "PlotJuggler", "protocol": 1})
+    def hello(self, key=KEY):
+        status, body, _ = self.http("POST", "/link/hello", {"title": "PlotJuggler", "protocol": 1}, link=key)
         self.assertEqual(status, 200)
         return body["id"]
 
@@ -156,20 +156,30 @@ class RelayTest(unittest.TestCase):
         self.assertEqual(self.http("POST", "/link/hello", {}, origin=LOCAL)[0], 200)
         self.assertEqual(self.http("POST", "/link/hello", {}, origin=None)[0], 200)  # desktop --mcp-relay
 
-    def test_launch_hands_the_page_the_secret_and_keeps_the_browser_off_stdout(self):
-        # BROWSER is a command that prints to its stdout, as real browsers do ("Opening in existing
-        # browser session."): it must land on stderr, not in the MCP channel.
+    def restart_without_test_key(self, cache):
         self.tearDown()
         self.port = free_port()
         self.base = f"http://127.0.0.1:{self.port}"
         self.cache = tempfile.TemporaryDirectory()
-        env = {**os.environ, "PJ_RELAY_PORT": str(self.port), "XDG_CACHE_HOME": self.cache.name,
-               "PJ_RELAY_KEY": KEY, "BROWSER": "echo opened %s"}
+        env = {k: v for k, v in os.environ.items() if k != "PJ_RELAY_KEY"}
+        env.update(PJ_RELAY_PORT=str(self.port), XDG_CACHE_HOME=cache, BROWSER="echo opened %s")
         self.relay = subprocess.Popen([sys.executable, str(RELAY)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                       stderr=subprocess.PIPE, env=env, text=True)
         self.relay.stderr.readline()
         self.next_id = 0
         self.rpc("initialize", {"protocolVersion": "2025-06-18", "clientInfo": {"name": "test-client"}})
+
+    def test_launch_hands_the_page_the_kept_secret_and_keeps_the_browser_off_stdout(self):
+        # BROWSER is a command that prints to its stdout, as real browsers do ("Opening in existing
+        # browser session."): it must land on stderr, not in the MCP channel.
+        keep = tempfile.TemporaryDirectory()
+        self.addCleanup(keep.cleanup)
+        self.restart_without_test_key(keep.name)
+        key_file = Path(keep.name) / "plotjuggler-agent" / "relay-key"
+        key = key_file.read_text()
+        if os.name == "posix":
+            self.assertEqual(key_file.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(self.http("POST", "/link/hello", {}, link=KEY)[0], 403)
         thread, box = self.call_async("launch")
         seen = {}
 
@@ -183,11 +193,13 @@ class RelayTest(unittest.TestCase):
         watcher.start()
         watcher.join(10)
         line = seen.get("line", "")
-        self.assertIn("mcp=" + urllib.parse.quote(f"{self.base}/?key={KEY}", safe=""), line)
-        self.hello()
+        self.assertIn("mcp=" + urllib.parse.quote(f"{self.base}/?key={key}", safe=""), line)
+        self.hello(key)
         thread.join(30)
         self.assertIn("result", box)  # the browser's line in the channel would have broken this reply
         self.assertFalse(box["result"].get("isError"), box)
+        self.restart_without_test_key(keep.name)  # a restarted relay still knows the open tab's key
+        self.assertEqual(self.http("POST", "/link/hello", {"title": "PlotJuggler"}, link=key)[0], 200)
 
     def test_a_page_the_relay_does_not_know_is_told_to_say_hello(self):
         self.assertEqual(self.http("GET", "/link/next?id=nope")[0], 404)

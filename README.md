@@ -61,8 +61,10 @@ When no desktop PlotJuggler is found (or `PJ_BROWSER=1` is set), `bin/plotjuggle
 started by an agent, so the page connects out: the `launch` tool opens
 `https://app.plotjuggler.io/?mcp=http://127.0.0.1:<port>/?key=<secret>` and the page long-polls the
 relay for the agent's messages. `open_file` paths are served to the page by the relay, since a page
-cannot read your disk. The secret is random per relay run and only `launch` hands it out: a page or
-local process without it cannot join. Browsers are also held to the hosted app's origin (`PJ_WASM_URL`,
+cannot read your disk. Pages must show the secret, which `launch` hands out and the relay keeps in
+`~/.cache/plotjuggler-agent/relay-key` (mode 0600, so an open tab survives a relay restart); it is as
+private as that URL (browser history, the app server's request log) and only good against this loopback
+relay. A desktop PlotJuggler joins with `--mcp-relay "http://127.0.0.1:<port>/?key=<that key>"`. Browsers are also held to the hosted app's origin (`PJ_WASM_URL`,
 default `https://app.plotjuggler.io/`); add others, such as a local server, with `PJ_RELAY_ORIGINS`.
 
 Use Chrome, Edge or Firefox; the first time, the browser may ask whether the page may access devices on
