@@ -18,10 +18,19 @@ set "EXE=%ProgramFiles%\PlotJuggler4\bin\PlotJuggler4.exe"
 if exist "%EXE%" goto run
 :browser
 set "RELAY=%~dp0..\relay\pj_mcp_relay.py"
-where py >nul 2>nul && (py -3 "%RELAY%" & exit /b %errorlevel%)
-where python >nul 2>nul && (python "%RELAY%" & exit /b %errorlevel%)
+rem Probe with -c first: a bare `python` may be the Microsoft Store stub, which only opens the Store.
+py -3 -c "" >nul 2>nul
+if not errorlevel 1 goto py
+python -c "" >nul 2>nul
+if not errorlevel 1 goto python
 echo PlotJuggler 4 not found, and no Python for the browser version. Install PlotJuggler from https://plotjuggler.io and start it once, set PLOTJUGGLER4, or install Python 3. 1>&2
 exit /b 1
+:py
+py -3 "%RELAY%"
+exit /b %errorlevel%
+:python
+python "%RELAY%"
+exit /b %errorlevel%
 :run
 "%EXE%" --mcp-bridge
 exit /b %errorlevel%

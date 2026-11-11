@@ -19,6 +19,7 @@
         "PJ_BROWSER",
         "PJ_WASM_URL",
         "PJ_RELAY_PORT",
+        "PJ_RELAY_ORIGINS",
         "BROWSER",
         "XDG_CACHE_HOME"
       ],

@@ -7,18 +7,21 @@ this relay on 127.0.0.1 and long-polls it; the agent talks MCP to the relay over
 standard library only: nothing to install. One relay per agent session.
 
 Page protocol (PlotJuggler's McpBrowserLink, docs/MCP_SERVER.md "Browser relay"). Every request
-carries `X-PJ-Link: 1`; a browser can only send that custom header after a CORS preflight, which
-admits only ALLOWED_ORIGINS, so no other website can drive or impersonate a page.
+carries `X-PJ-Link: <SECRET>`, a random secret only `launch` hands out (in the page URL it opens:
+?mcp=<relay>/?key=<SECRET>), so no other local process or page can join as a PlotJuggler page. Being
+a custom header it also makes a browser ask first (CORS preflight), answered only for ALLOWED_ORIGINS.
 
-  POST /link/hello {"title", "protocol"}   -> {"id"}               a page joins (one instance)
+  POST /link/hello {"title", "protocol", "browser"} -> {"id"}      a page joins (one instance)
   GET  /link/next?id=                      -> {"seq", "client", "message"} | 204 after POLL_S | 404 unknown id
   POST /link/reply?id= {"seq", "response"} -> 204                  the answer to message `seq`
   GET  /file/<token>/<name>                -> the file open_file named (the page cannot read the disk)
 
 Environment: PJ_RELAY_PORT (default: the first free of 7381-7390), PJ_WASM_URL (the app to open,
-default https://app.plotjuggler.io/), PJ_RELAY_ORIGINS (more allowed origins, comma-separated).
+default https://app.plotjuggler.io/), PJ_RELAY_ORIGINS (more allowed origins, comma-separated, e.g. a
+local http://127.0.0.1:8080 serving the WASM package).
 """
 
+import hmac
 import json
 import os
 import secrets
@@ -33,7 +36,7 @@ from pathlib import Path
 VERSION = "0.3.0"
 WASM_URL = os.environ.get("PJ_WASM_URL", "https://app.plotjuggler.io/")
 POLL_S = 20  # a page's poll is held this long when there is nothing to send
-LIVE_S = 45  # a page that has not polled for this long is gone (closed tab)
+LIVE_S = 120  # a page that has not polled for this long is gone (closed tab, or a page frozen that long)
 CALL_TIMEOUT_S = 300  # as the desktop bridge: a long import or a dialog may hold a call
 LAUNCH_TIMEOUT_S = 180  # the first load of the app downloads tens of MB
 HERE = Path(__file__).resolve().parent
@@ -46,17 +49,16 @@ def origin_of(url):
     return f"{parts.scheme}://{parts.netloc}"
 
 
+SECRET = os.environ.get("PJ_RELAY_KEY") or secrets.token_urlsafe(24)  # PJ_RELAY_KEY: tests only
 ALLOWED_ORIGINS = {origin_of(WASM_URL), "https://app.plotjuggler.io"} | {
     o.strip().rstrip("/") for o in os.environ.get("PJ_RELAY_ORIGINS", "").split(",") if o.strip()
 }
 
 
 def origin_allowed(origin):
-    """No Origin: not a browser (PlotJuggler desktop's --mcp-relay). A local server (serve_wasm.mjs) is allowed."""
-    if origin is None:
-        return True
-    parts = urllib.parse.urlsplit(origin)
-    return origin in ALLOWED_ORIGINS or (parts.scheme == "http" and parts.hostname in ("127.0.0.1", "localhost"))
+    """No Origin: not a browser (PlotJuggler desktop's --mcp-relay), which still needs the secret. A local server
+    (serve_wasm.mjs) gets in only through PJ_RELAY_ORIGINS."""
+    return origin is None or origin in ALLOWED_ORIGINS
 
 
 def log(*args):
@@ -64,8 +66,9 @@ def log(*args):
 
 
 class Tab:
-    def __init__(self, title):
+    def __init__(self, title, browser):
         self.title = title
+        self.browser = browser  # its tool list is the browser build's
         self.last_seen = time.monotonic()
         self.queue = []  # messages for the page, oldest first
         self.cond = threading.Condition()
@@ -88,10 +91,10 @@ class Relay:
 
     # --- the page side -------------------------------------------------------------------------
 
-    def hello(self, title):
+    def hello(self, title, browser):
         with self.lock:
-            tab_id = secrets.token_hex(4)
-            self.tabs[tab_id] = Tab(str(title)[:200])
+            tab_id = secrets.token_hex(16)
+            self.tabs[tab_id] = Tab(str(title)[:200], browser is True)
             self.joined.notify_all()
         log("page joined:", tab_id)
         return tab_id
@@ -133,12 +136,12 @@ class Relay:
         """Sends `message` to the page and waits for its JSON-RPC response; None on timeout or a closed page."""
         event = threading.Event()
         with self.lock:
+            tab = self.tabs.get(tab_id)
+            if tab is None:
+                return None
             self.seq += 1
             seq = self.seq
             self.waiting[seq] = [event, None, tab_id]
-            tab = self.tabs.get(tab_id)
-        if tab is None:
-            return None
         with tab.cond:
             tab.queue.append({"seq": seq, "client": self.client, "message": message})
             tab.cond.notify_all()
@@ -185,15 +188,16 @@ class PageHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def admitted(self, link=True):
-        if not origin_allowed(self.headers.get("Origin")) or (link and self.headers.get("X-PJ-Link") != "1"):
+        secret_ok = hmac.compare_digest(self.headers.get("X-PJ-Link", "").encode(), SECRET.encode())
+        if not origin_allowed(self.headers.get("Origin")) or (link and not secret_ok):
             self.answer(403)
             return False
         return True
 
     def body(self):
         length = int(self.headers.get("Content-Length") or 0)
-        if length > 64 * 1024 * 1024:
-            raise ValueError("body too large")
+        if length < 0 or length > 64 * 1024 * 1024:
+            raise ValueError("bad body length")
         return json.loads(self.rfile.read(length) or b"null")
 
     def do_OPTIONS(self):  # CORS preflight, also Chrome's Local Network Access one
@@ -240,7 +244,8 @@ class PageHandler(BaseHTTPRequestHandler):
             self.answer(400)
             return
         if url.path == "/link/hello":
-            self.answer(200, {"id": RELAY.hello(body.get("title", "") if isinstance(body, dict) else "")})
+            body = body if isinstance(body, dict) else {}
+            self.answer(200, {"id": RELAY.hello(body.get("title", ""), body.get("browser"))})
             return
         if not isinstance(body, dict) or not isinstance(body.get("seq"), int):
             self.answer(400)
@@ -357,14 +362,17 @@ def list_tools():
         response = RELAY.ask(tab, {"jsonrpc": "2.0", "id": 0, "method": "tools/list", "params": {}}, timeout=10)
         tools = ((response or {}).get("result") or {}).get("tools")
         if isinstance(tools, list):
-            remember_tools(tools)
+            page = RELAY.live_tabs().get(tab)
+            if page is not None and page.browser:  # a desktop --mcp-relay window lists desktop-only tools
+                remember_tools(tools)
             return tools + RELAY_TOOLS
     return page_tools() + RELAY_TOOLS
 
 
 def launch():
     before = set(RELAY.live_tabs())
-    url = WASM_URL + ("&" if "?" in WASM_URL else "?") + "mcp=" + urllib.parse.quote(RELAY.base, safe="")
+    relay = f"{RELAY.base}/?key={SECRET}"
+    url = WASM_URL + ("&" if "?" in WASM_URL else "?") + "mcp=" + urllib.parse.quote(relay, safe="")
     opened = webbrowser.open(url)
     with RELAY.lock:
         joined = RELAY.joined.wait_for(lambda: set(RELAY.tabs) - before, timeout=LAUNCH_TIMEOUT_S)
@@ -430,6 +438,7 @@ def call_tool(message, params):
 
 
 OUT_LOCK = threading.Lock()
+MCP_OUT = sys.stdout  # main() points it at the real stdout and fd 1 at stderr
 
 
 def handle(line):
@@ -437,8 +446,9 @@ def handle(line):
         message = json.loads(line)
     except ValueError:
         return {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "parse error"}}
-    if not isinstance(message, dict) or "method" not in message:
-        return {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "invalid request"}}
+    if not isinstance(message, dict) or not isinstance(message.get("method"), str):
+        known_id = message.get("id") if isinstance(message, dict) and isinstance(message.get("id"), (str, int)) else None
+        return {"jsonrpc": "2.0", "id": known_id, "error": {"code": -32600, "message": "invalid request"}}
     if "id" not in message:
         return None  # a notification
     method = message["method"]
@@ -460,6 +470,8 @@ def handle(line):
             reply["result"] = {"tools": list_tools()}
         elif method == "tools/call" and isinstance(params.get("name"), str):
             reply["result"] = call_tool(message, params)
+        elif method == "tools/call":
+            reply = {"jsonrpc": "2.0", "id": message["id"], "error": {"code": -32602, "message": "tools/call needs a string name"}}
         else:
             reply = {"jsonrpc": "2.0", "id": message["id"], "error": {"code": -32601, "message": "method not found"}}
     except Exception as e:  # noqa: BLE001 - one bad call must not end the session
@@ -471,8 +483,8 @@ def answer(line):
     reply = handle(line)
     if reply is not None:
         with OUT_LOCK:
-            sys.stdout.write(json.dumps(reply) + "\n")
-            sys.stdout.flush()
+            MCP_OUT.write(json.dumps(reply) + "\n")
+            MCP_OUT.flush()
 
 
 def listen():
@@ -493,6 +505,13 @@ def listen():
 
 
 def main():
+    global MCP_OUT
+    # stdout is the MCP channel: keep it for replies only, and send fd 1 to stderr, so a child that
+    # inherits it (the browser webbrowser.open starts, "Opening in existing browser session.") cannot
+    # write into the protocol. UTF-8 both ways: Windows pipes default to the ANSI code page.
+    MCP_OUT = os.fdopen(os.dup(sys.stdout.fileno()), "w", encoding="utf-8", newline="\n")
+    os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
+    sys.stdin.reconfigure(encoding="utf-8")
     if not listen():
         return 1
     # A call may wait minutes (an import, the user's dialog): each one gets its own thread.

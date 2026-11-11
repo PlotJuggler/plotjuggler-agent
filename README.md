@@ -59,11 +59,11 @@ When no desktop PlotJuggler is found (or `PJ_BROWSER=1` is set), `bin/plotjuggle
 `relay/pj_mcp_relay.py` instead: a stdio MCP server, standard-library Python only, that listens on
 `127.0.0.1` (first free port of 7381-7390, or `PJ_RELAY_PORT`). A web page can neither listen nor be
 started by an agent, so the page connects out: the `launch` tool opens
-`https://app.plotjuggler.io/?mcp=http://127.0.0.1:<port>` and the page long-polls the relay for the
-agent's messages. `open_file` paths are served to the page by the relay, since a page cannot read your
-disk. Only the hosted app's origin (`PJ_WASM_URL`, default `https://app.plotjuggler.io/`; more with
-`PJ_RELAY_ORIGINS`) and local servers get in, and every page request must carry a header that other
-websites cannot send without the relay's consent (CORS preflight).
+`https://app.plotjuggler.io/?mcp=http://127.0.0.1:<port>/?key=<secret>` and the page long-polls the
+relay for the agent's messages. `open_file` paths are served to the page by the relay, since a page
+cannot read your disk. The secret is random per relay run and only `launch` hands it out: a page or
+local process without it cannot join. Browsers are also held to the hosted app's origin (`PJ_WASM_URL`,
+default `https://app.plotjuggler.io/`); add others, such as a local server, with `PJ_RELAY_ORIGINS`.
 
 Use Chrome, Edge or Firefox; the first time, the browser may ask whether the page may access devices on
 your local network: allow it. `export_series` and `about` are desktop only.

@@ -13,11 +13,14 @@ import tempfile
 import threading
 import unittest
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
 RELAY = Path(__file__).resolve().parent.parent / "relay" / "pj_mcp_relay.py"
 APP = "https://app.plotjuggler.io"
+LOCAL = "http://127.0.0.1:8080"
+KEY = "test-secret"
 
 
 def free_port():
@@ -31,7 +34,8 @@ class RelayTest(unittest.TestCase):
         self.port = free_port()
         self.base = f"http://127.0.0.1:{self.port}"
         self.cache = tempfile.TemporaryDirectory()
-        env = {**os.environ, "PJ_RELAY_PORT": str(self.port), "XDG_CACHE_HOME": self.cache.name}
+        env = {**os.environ, "PJ_RELAY_PORT": str(self.port), "XDG_CACHE_HOME": self.cache.name,
+               "PJ_RELAY_KEY": KEY, "PJ_RELAY_ORIGINS": LOCAL}
         self.relay = subprocess.Popen(
             [sys.executable, str(RELAY)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             env=env, text=True,
@@ -68,12 +72,12 @@ class RelayTest(unittest.TestCase):
 
     # --- the page ---
 
-    def http(self, method, path, body=None, origin=APP, link=True):
+    def http(self, method, path, body=None, origin=APP, link=KEY):
         request = urllib.request.Request(self.base + path, method=method, data=None if body is None else json.dumps(body).encode())
         if origin:
             request.add_header("Origin", origin)
         if link:
-            request.add_header("X-PJ-Link", "1")
+            request.add_header("X-PJ-Link", link)
         try:
             with urllib.request.urlopen(request, timeout=30) as response:
                 data = response.read()
@@ -131,22 +135,59 @@ class RelayTest(unittest.TestCase):
             self.assertEqual(args["path"], f.name)
             self.assertEqual(args["name"], os.path.basename(f.name))
             self.assertTrue(args["url"].startswith(self.base + "/file/"))
-            status, data, headers = self.http("GET", args["url"][len(self.base):], link=False)
+            status, data, headers = self.http("GET", args["url"][len(self.base):], link=None)
             self.assertEqual((status, data), (200, b"time,a\n0,1\n"))
             self.assertEqual(headers["Access-Control-Allow-Origin"], APP)
-            self.assertEqual(self.http("GET", "/file/guessed/x.csv", link=False)[0], 404)
+            self.assertEqual(self.http("GET", "/file/guessed/x.csv", link=None)[0], 404)
         finally:
             os.unlink(f.name)
 
-    def test_only_allowed_origins_with_the_link_header_get_in(self):
+    def test_only_allowed_origins_with_the_secret_get_in(self):
         self.assertEqual(self.http("POST", "/link/hello", {}, origin="https://evil.example")[0], 403)
-        self.assertEqual(self.http("POST", "/link/hello", {}, link=False)[0], 403)
+        self.assertEqual(self.http("POST", "/link/hello", {}, link=None)[0], 403)
+        self.assertEqual(self.http("POST", "/link/hello", {}, link="1")[0], 403)
+        self.assertEqual(self.http("POST", "/link/hello", {}, origin=None, link="1")[0], 403)  # a local process
+        self.assertEqual(self.http("POST", "/link/hello", {}, origin="http://localhost:9999")[0], 403)
         self.assertEqual(self.http("OPTIONS", "/link/hello", origin="https://evil.example")[0], 403)
         status, _, headers = self.http("OPTIONS", "/link/hello")
         self.assertEqual(status, 204)
         self.assertEqual(headers["Access-Control-Allow-Private-Network"], "true")
         self.assertIn("X-PJ-Link", headers["Access-Control-Allow-Headers"])
-        self.assertEqual(self.http("POST", "/link/hello", {}, origin="http://localhost:8080")[0], 200)
+        self.assertEqual(self.http("POST", "/link/hello", {}, origin=LOCAL)[0], 200)
+        self.assertEqual(self.http("POST", "/link/hello", {}, origin=None)[0], 200)  # desktop --mcp-relay
+
+    def test_launch_hands_the_page_the_secret_and_keeps_the_browser_off_stdout(self):
+        # BROWSER is a command that prints to its stdout, as real browsers do ("Opening in existing
+        # browser session."): it must land on stderr, not in the MCP channel.
+        self.tearDown()
+        self.port = free_port()
+        self.base = f"http://127.0.0.1:{self.port}"
+        self.cache = tempfile.TemporaryDirectory()
+        env = {**os.environ, "PJ_RELAY_PORT": str(self.port), "XDG_CACHE_HOME": self.cache.name,
+               "PJ_RELAY_KEY": KEY, "BROWSER": "echo opened %s"}
+        self.relay = subprocess.Popen([sys.executable, str(RELAY)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                      stderr=subprocess.PIPE, env=env, text=True)
+        self.relay.stderr.readline()
+        self.next_id = 0
+        self.rpc("initialize", {"protocolVersion": "2025-06-18", "clientInfo": {"name": "test-client"}})
+        thread, box = self.call_async("launch")
+        seen = {}
+
+        def watch_stderr():
+            while "opened" not in seen.get("line", ""):
+                seen["line"] = self.relay.stderr.readline()
+                if not seen["line"]:
+                    return
+
+        watcher = threading.Thread(target=watch_stderr, daemon=True)
+        watcher.start()
+        watcher.join(10)
+        line = seen.get("line", "")
+        self.assertIn("mcp=" + urllib.parse.quote(f"{self.base}/?key={KEY}", safe=""), line)
+        self.hello()
+        thread.join(30)
+        self.assertIn("result", box)  # the browser's line in the channel would have broken this reply
+        self.assertFalse(box["result"].get("isError"), box)
 
     def test_a_page_the_relay_does_not_know_is_told_to_say_hello(self):
         self.assertEqual(self.http("GET", "/link/next?id=nope")[0], 404)
