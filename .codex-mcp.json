@@ -15,7 +15,13 @@
         "XDG_DATA_HOME",
         "USERPROFILE",
         "LOCALAPPDATA",
-        "APPDATA"
+        "APPDATA",
+        "PJ_BROWSER",
+        "PJ_WASM_URL",
+        "PJ_RELAY_PORT",
+        "PJ_RELAY_ORIGINS",
+        "BROWSER",
+        "XDG_CACHE_HOME"
       ],
       "startup_timeout_sec": 20,
       "tool_timeout_sec": 900,

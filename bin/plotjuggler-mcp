@@ -2,9 +2,23 @@
 # SPDX-License-Identifier: MPL-2.0
 # Starts `plotjuggler4 --mcp-bridge` (MCP over stdio) for an agent plugin.
 # Finds PlotJuggler 4 in this order: $PLOTJUGGLER4, PATH, the path the app records at every start,
-# then the usual install locations. Nothing else may be printed on stdout: it is the MCP channel.
+# then the usual install locations. Without a desktop install (or with PJ_BROWSER=1) it starts the
+# browser relay instead: PlotJuggler then runs in the web browser, nothing to install.
+# Nothing else may be printed on stdout: it is the MCP channel.
 
 run() { exec "$1" --mcp-bridge; }
+
+browser() {
+  relay="$(dirname "$0")/../relay/pj_mcp_relay.py"
+  for py in python3 python; do
+    command -v "$py" >/dev/null 2>&1 && exec "$py" "$relay"
+  done
+  echo "PlotJuggler 4 not found, and no python3 for the browser version. Install PlotJuggler from" \
+       "https://plotjuggler.io and start it once, set PLOTJUGGLER4 to the executable, or install python3." >&2
+  exit 1
+}
+
+[ "${PJ_BROWSER:-}" = 1 ] && browser
 
 [ -n "${PLOTJUGGLER4:-}" ] && [ -x "$PLOTJUGGLER4" ] && run "$PLOTJUGGLER4"
 exe=$(command -v plotjuggler4 2>/dev/null) && run "$exe"
@@ -25,6 +39,4 @@ for exe in /Applications/PlotJuggler.app/Contents/MacOS/plotjuggler4 \
   [ -x "$exe" ] && run "$exe"
 done
 
-echo "PlotJuggler 4 not found. Install it from https://plotjuggler.io and start it once," \
-     "or set PLOTJUGGLER4 to the plotjuggler4 executable." >&2
-exit 1
+browser

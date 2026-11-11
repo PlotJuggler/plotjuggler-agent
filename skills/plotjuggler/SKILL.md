@@ -5,11 +5,21 @@ description: Use when the user wants to look at, plot, analyze or debug time-ser
 
 # PlotJuggler 4 through MCP
 
-PlotJuggler runs on the user's desktop; the `plotjuggler` MCP tools act on that window. The user sees
-everything you create, so work in their app instead of decoding files or plotting with your own scripts.
+PlotJuggler runs on the user's desktop, or in their web browser when the desktop app is not
+installed; the `plotjuggler` MCP tools act on that window or page. The user sees everything you create,
+so work in their app instead of decoding files or plotting with your own scripts.
 
 ## Start
 
+0. **Browser or desktop?** When the server's instructions say PlotJuggler runs in the user's web browser,
+   the desktop app was not found. If `list_instances` shows no page, ASK the user before anything else:
+   open PlotJuggler in the browser now (nothing to install: call `launch`, which opens a tab on
+   https://app.plotjuggler.io linked to this session), or install the desktop app from
+   https://plotjuggler.io (then they restart this agent session to use it). In the browser:
+   - Chrome, Edge or Firefox. The browser may ask to let the page reach this computer (local network
+     access): tell the user to allow it, the page talks only to this session's relay on 127.0.0.1.
+   - `open_file` still takes a path on this computer: the relay hands the file to the page (up to 512 MB).
+   - `export_series` and `about` do not exist there. Data lives in that tab: closing it loses it.
 1. `list_instances`. None running: `launch` (it starts PlotJuggler and waits). Several: ask the user
    which one, then `select_instance`. A window the user started is listed unless they turned agent
    access off (Preferences → Appearance); then ask them to turn it on, or `launch` a separate one.
@@ -22,9 +32,9 @@ everything you create, so work in their app instead of decoding files or plottin
    to let the user set it up. Topics appear while it runs: poll `list_topics`. `stop_stream` keeps the
    data. Ask before starting a stream the user did not mention.
 
-If the tools are missing or fail to start, PlotJuggler 4 is not installed or not found: tell the user
-to install it from https://plotjuggler.io and start it once, or to set `PLOTJUGGLER4` to the
-executable. With Codex on Linux, `launch` needs the display variables (the plugin forwards them; if
+If the tools are missing or fail to start, neither the desktop app nor `python3` (which runs the browser
+relay) was found: tell the user to install PlotJuggler from https://plotjuggler.io and start it once, to
+set `PLOTJUGGLER4` to the executable, or to install python3 for the browser version. With Codex on Linux, `launch` needs the display variables (the plugin forwards them; if
 `launch` says they are unset or the window fails to open, the user must start PlotJuggler themselves).
 
 ## Find and read data
