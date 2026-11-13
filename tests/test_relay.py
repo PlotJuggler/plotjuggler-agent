@@ -123,6 +123,75 @@ class RelayTest(unittest.TestCase):
         listed = json.loads(self.call("list_instances")["content"][0]["text"])
         self.assertEqual(listed, [{"id": tab, "title": "PlotJuggler", "selected": True}])
 
+    def notify(self, method, params):
+        self.relay.stdin.write(json.dumps({"jsonrpc": "2.0", "method": method, "params": params}) + "\n")
+        self.relay.stdin.flush()
+
+    def next_message(self, tab):
+        """The next message the relay has for the page, acknowledged with no response."""
+        while True:
+            status, item, _ = self.http("GET", f"/link/next?id={tab}")
+            if status == 200:
+                break
+            self.assertEqual(status, 204)
+        self.assertEqual(self.http("POST", f"/link/reply?id={tab}", {"seq": item["seq"], "response": None})[0], 204)
+        return item["message"]
+
+    def test_a_cancellation_reaches_the_page_while_its_call_is_in_flight(self):
+        tab = self.hello()
+        thread, box = self.call_async("open_file", {"path": str(RELAY)})
+        while True:  # the call is with the page, unanswered
+            status, held, _ = self.http("GET", f"/link/next?id={tab}")
+            if status == 200:
+                break
+        self.notify("notifications/cancelled", {"requestId": held["message"]["id"]})
+        cancelled = self.next_message(tab)
+        self.assertEqual(cancelled["method"], "notifications/cancelled")
+        self.assertEqual(cancelled["params"]["requestId"], held["message"]["id"])
+        self.assertNotIn("id", cancelled)
+        # The page ends the cancelled call; other notifications never reach it.
+        self.notify("notifications/initialized", {})
+        response = {"jsonrpc": "2.0", "id": held["message"]["id"], "result": {"content": [{"type": "text", "text": "killed"}], "isError": True}}
+        self.assertEqual(self.http("POST", f"/link/reply?id={tab}", {"seq": held["seq"], "response": response})[0], 204)
+        thread.join(10)
+        self.assertTrue(box["result"]["isError"])
+        self.assertEqual(self.http("GET", f"/link/next?id={tab}")[0], 204)
+
+    def test_the_tasks_methods_and_the_pages_extensions_pass_through(self):
+        tab = self.hello()
+        tasks = {"io.modelcontextprotocol/tasks": {}}
+        box = {}
+        thread = threading.Thread(target=lambda: box.update(reply=self.rpc("server/discover", {})))
+        thread.start()
+        self.serve_once(tab, lambda m: {"instructions": "loaded: x", "capabilities": {"tools": {}, "extensions": tasks}})
+        thread.join(10)
+        self.assertEqual(box["reply"]["result"]["capabilities"], {"tools": {}, "extensions": tasks})
+        self.assertEqual(box["reply"]["result"]["instructions"], "loaded: x")
+
+        params = {"taskId": "abc", "_meta": {"io.modelcontextprotocol/clientCapabilities": {"extensions": tasks}}}
+        thread = threading.Thread(target=lambda: box.update(reply=self.rpc("tasks/get", params)))
+        thread.start()
+        item = self.serve_once(tab, lambda m: {"taskId": "abc", "status": "working", "resultType": "complete"})
+        thread.join(10)
+        self.assertEqual(item["message"]["method"], "tasks/get")
+        self.assertEqual(item["message"]["params"], params)
+        self.assertEqual(box["reply"]["result"]["status"], "working")
+        # An error comes back as the error it is, not as a tool result.
+        thread = threading.Thread(target=lambda: box.update(reply=self.rpc("tasks/cancel", params)))
+        thread.start()
+        while True:
+            status, item, _ = self.http("GET", f"/link/next?id={tab}")
+            if status == 200:
+                break
+        refusal = {"jsonrpc": "2.0", "id": item["message"]["id"], "error": {"code": -32602, "message": "Task not found"}}
+        self.http("POST", f"/link/reply?id={tab}", {"seq": item["seq"], "response": refusal})
+        thread.join(10)
+        self.assertEqual(box["reply"]["error"]["code"], -32602)
+
+    def test_without_a_page_the_tasks_methods_are_refused_and_no_extension_is_offered(self):
+        self.assertNotIn("extensions", self.rpc("server/discover", {})["result"]["capabilities"])
+        self.assertEqual(self.rpc("tasks/get", {"taskId": "abc"})["error"]["code"], -32603)
+
     def test_open_file_hands_the_page_a_url_it_can_download(self):
         tab = self.hello()
         with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
