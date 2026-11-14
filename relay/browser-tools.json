@@ -17,7 +17,7 @@
    "openWorldHint": false,
    "readOnlyHint": false
   },
-  "description": "Load a data file (MCAP, CSV, ULog, Parquet...). Returns when the import has finished (a client tool timeout does not stop it: get_status shows the dataset once it lands). By default the loader's own defaults apply (e.g. every topic). ask_user=true opens PlotJuggler's loader dialog so the user picks topics/options; the call returns when they finish or cancel. config: loader settings JSON (get_status shows the config each loaded dataset used, as a template).",
+  "description": "Load a data file (MCAP, CSV, ULog, Parquet...). Returns when the import has finished, or after wait_s with a job_id while a large file still loads: its topics are readable as they arrive, job_wait returns the outcome and job_kill stops the import. By default the loader's own defaults apply (e.g. every topic). ask_user=true opens PlotJuggler's loader dialog so the user picks topics/options. config: loader settings JSON (get_status shows the config each loaded dataset used, as a template).",
   "inputSchema": {
    "properties": {
     "ask_user": {
@@ -29,6 +29,10 @@
     "path": {
      "description": "absolute path",
      "type": "string"
+    },
+    "wait_s": {
+     "description": "seconds to wait for the result (default 20, at most 120). A call still running then returns {job_id, state, progress} and carries on in the background: job_wait gets its result, job_kill stops it. 0 returns the job_id at once.",
+     "type": "number"
     }
    },
    "required": [
@@ -43,7 +47,7 @@
    "openWorldHint": false,
    "readOnlyHint": false
   },
-  "description": "Remove a loaded dataset and its data. If derived series depend on it, the user is asked to confirm in PlotJuggler and the call returns their answer.",
+  "description": "Remove a loaded dataset and its data. If derived series depend on it, the user is asked to confirm in PlotJuggler and the call returns their answer (or a job_id after wait_s while they decide; job_kill withdraws the question).",
   "inputSchema": {
    "properties": {
     "dataset": {
@@ -52,6 +56,10 @@
       "string",
       "integer"
      ]
+    },
+    "wait_s": {
+     "description": "seconds to wait for the result (default 20, at most 120). A call still running then returns {job_id, state, progress} and carries on in the background: job_wait gets its result, job_kill stops it. 0 returns the job_id at once.",
+     "type": "number"
     }
    },
    "required": [
@@ -75,6 +83,10 @@
       "string",
       "integer"
      ]
+    },
+    "wait_s": {
+     "description": "seconds to wait for the result (default 20, at most 120). A call still running then returns {job_id, state, progress} and carries on in the background: job_wait gets its result, job_kill stops it. 0 returns the job_id at once.",
+     "type": "number"
     }
    },
    "required": [
@@ -89,7 +101,7 @@
    "openWorldHint": false,
    "readOnlyHint": false
   },
-  "description": "Start a live streaming source (get_status lists stream_sources; about says what each one is). By default it uses the settings the user last confirmed in that source's dialog; config passes your own (get_status shows a live stream's config, as a template); ask_user=true opens the source's dialog so the user sets it up, and the call returns when they finish or cancel. Topics appear as the source advertises them.",
+  "description": "Start a live streaming source (get_status lists stream_sources; about says what each one is). By default it uses the settings the user last confirmed in that source's dialog; config passes your own (get_status shows a live stream's config, as a template); ask_user=true opens the source's dialog so the user sets it up. Returns dataset_id once the stream runs, with the job_id of the job that lives as long as the stream: job_kill (or stop_stream) stops it, job_wait returns when it ends. Topics appear as the source advertises them.",
   "inputSchema": {
    "properties": {
     "ask_user": {
@@ -101,6 +113,10 @@
     "source": {
      "description": "stream source name, from stream_sources",
      "type": "string"
+    },
+    "wait_s": {
+     "description": "seconds to wait for the result (default 20, at most 120). A call still running then returns {job_id, state, progress} and carries on in the background: job_wait gets its result, job_kill stops it. 0 returns the job_id at once.",
+     "type": "number"
     }
    },
    "required": [
@@ -335,6 +351,48 @@
    "openWorldHint": false,
    "readOnlyHint": true
   },
+  "description": "Wait for a live series to cross a threshold: returns the first sample that ARRIVES AFTER this call and satisfies 'comparison' against 'threshold' (its value and display time), or fails after 'timeout_s'. For watching a stream; samples already loaded do not count (read_series finds those).",
+  "inputSchema": {
+   "properties": {
+    "comparison": {
+     "enum": [
+      ">",
+      "<",
+      ">=",
+      "<="
+     ],
+     "type": "string"
+    },
+    "series": {
+     "description": "one topic/field path",
+     "type": "string"
+    },
+    "threshold": {
+     "type": "number"
+    },
+    "timeout_s": {
+     "description": "default 60, at most 3600",
+     "type": "number"
+    },
+    "wait_s": {
+     "description": "seconds to wait for the result (default 20, at most 120). A call still running then returns {job_id, state, progress} and carries on in the background: job_wait gets its result, job_kill stops it. 0 returns the job_id at once.",
+     "type": "number"
+    }
+   },
+   "required": [
+    "series",
+    "comparison",
+    "threshold"
+   ],
+   "type": "object"
+  },
+  "name": "wait_for"
+ },
+ {
+  "annotations": {
+   "openWorldHint": false,
+   "readOnlyHint": true
+  },
   "description": "Run a Luau computation and get the answer back \u2014 nothing is created or shown. Picked automatically: SCALAR (default) takes the same inputs/expression/body/global as create_derived_series and returns stats, add 'buckets' for the shape. OBJECT form kicks in when an input is an object topic or 'at_s'/'window' is given: requires 'body' (reads inputs[\"<topic>\"], returns a table of 'outputs') and 'outputs' ([\"name:type\", \u2026], type is 'number', 'string', or a builtin object type e.g. 'kPointCloud'); 'at_s' evaluates at one display-seconds instant, 'window':{start_s,end_s} over a span, neither defaults to the playhead. Objects come back only as summaries, never bytes. To keep a result, create_derived_object.",
   "inputSchema": {
    "properties": {
@@ -382,6 +440,10 @@
       "type": "string"
      },
      "type": "array"
+    },
+    "wait_s": {
+     "description": "seconds to wait for the result (default 20, at most 120). A call still running then returns {job_id, state, progress} and carries on in the background: job_wait gets its result, job_kill stops it. 0 returns the job_id at once.",
+     "type": "number"
     },
     "window": {
      "description": "object: span, display seconds",
@@ -486,6 +548,10 @@
     },
     "pin_at_s": {
      "description": "OPTIONAL \u2014 pin as a finding, display seconds",
+     "type": "number"
+    },
+    "wait_s": {
+     "description": "seconds to wait for the result (default 20, at most 120). A call still running then returns {job_id, state, progress} and carries on in the background: job_wait gets its result, job_kill stops it. 0 returns the job_id at once.",
      "type": "number"
     }
    },
@@ -741,5 +807,64 @@
    "type": "object"
   },
   "name": "report_status"
+ },
+ {
+  "annotations": {
+   "openWorldHint": false,
+   "readOnlyHint": true
+  },
+  "description": "Your calls still running in the background, and those that ended in the last minutes: job_id, tool, summary, state (running, waiting_for_user, completed, failed, killed), elapsed_s, progress.",
+  "inputSchema": {
+   "properties": {},
+   "required": [],
+   "type": "object"
+  },
+  "name": "jobs_list"
+ },
+ {
+  "annotations": {
+   "openWorldHint": false,
+   "readOnlyHint": true
+  },
+  "description": "Wait for a background job: returns its result once it ends (again on every call, until it expires minutes later), or its job_id, state and progress if it is still running after timeout_s (default 20, at most 60; 0 only looks).",
+  "inputSchema": {
+   "properties": {
+    "job_id": {
+     "description": "a job_id a long call returned",
+     "type": "integer"
+    },
+    "timeout_s": {
+     "type": "number"
+    }
+   },
+   "required": [
+    "job_id"
+   ],
+   "type": "object"
+  },
+  "name": "job_wait"
+ },
+ {
+  "annotations": {
+   "openWorldHint": false,
+   "readOnlyHint": false
+  },
+  "description": "Stop a background job: an evaluation stops computing, a file import stops (keep_partial, default true, keeps the rows loaded so far; false removes them; a stopped reload always restores the data it was replacing), a stream stops (its data stays), an export writes nothing, and a dialog the job opened for the user closes. Returns its final state: killed, or completed/failed if it ended first; when the stop takes longer to act, its state with stopping=true (job_wait then returns when it has ended).",
+  "inputSchema": {
+   "properties": {
+    "job_id": {
+     "description": "a job_id a long call returned",
+     "type": "integer"
+    },
+    "keep_partial": {
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "job_id"
+   ],
+   "type": "object"
+  },
+  "name": "job_kill"
  }
 ]

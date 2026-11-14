@@ -35,7 +35,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 WASM_URL = os.environ.get("PJ_WASM_URL", "https://app.plotjuggler.io/")
 POLL_S = 20  # a page's poll is held this long when there is nothing to send
 LIVE_S = 120  # a page that has not polled for this long is gone (closed tab, or a page frozen that long)
