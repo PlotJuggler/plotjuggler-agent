@@ -37,6 +37,21 @@ relay) was found: tell the user to install PlotJuggler from https://plotjuggler.
 set `PLOTJUGGLER4` to the executable, or to install python3 for the browser version. With Codex on Linux, `launch` needs the display variables (the plugin forwards them; if
 `launch` says they are unset or the window fails to open, the user must start PlotJuggler themselves).
 
+## Long calls are jobs
+
+- A call that takes long (a large `open_file`, a heavy `evaluate`, an `ask_user` dialog the user has not
+  answered) returns after `wait_s` (20 s unless you pass it) with a `job_id` in place of its result, and
+  the work goes on. `job_wait` returns the result once it is there, `jobs_list` shows what is running
+  with its progress, `job_kill` stops it. A stopped import keeps the rows loaded so far unless you pass
+  `keep_partial: false`; a stopped reload restores the data it was replacing.
+- `start_stream` returns the `job_id` of a job that lives as long as the stream: `job_kill` or
+  `stop_stream` stops it, and the data stays.
+- `wait_for` waits for a live series to cross a threshold. Only samples that arrive after the call
+  count: use `read_series` for what is already loaded.
+- The user sees your running jobs from PlotJuggler's status bar and can stop any of them. A job that
+  reads `killed` was stopped, by you or by them: say so, and do not start it again without asking.
+- A PlotJuggler without these tools is an older version: its calls simply take as long as the work.
+
 ## Find and read data
 
 - `list_topics` (with `filter`) and `describe_topic` find paths. A unique suffix of a path resolves;

@@ -35,7 +35,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 WASM_URL = os.environ.get("PJ_WASM_URL", "https://app.plotjuggler.io/")
 POLL_S = 20  # a page's poll is held this long when there is nothing to send
 LIVE_S = 120  # a page that has not polled for this long is gone (closed tab, or a page frozen that long)
@@ -182,6 +182,18 @@ class Relay:
         finally:
             with self.lock:
                 self.waiting.pop(seq, None)
+
+    def tell(self, tab_id, message):
+        """Sends `message`, a notification, to the page: nothing comes back."""
+        with self.lock:
+            tab = self.tabs.get(tab_id)
+            if tab is None:
+                return
+            self.seq += 1
+            seq = self.seq  # the page acknowledges it; reply() drops an answer nobody waits for
+        with tab.cond:
+            tab.queue.append({"seq": seq, "client": self.client, "message": message})
+            tab.cond.notify_all()
 
     def serve_file(self, path):
         token = secrets.token_urlsafe(16)
@@ -349,6 +361,10 @@ def client_name(params):
     return info.get("name", "") if isinstance(info, dict) else ""
 
 
+# Passed on to the page whole, answers and errors included: the MCP Tasks extension's methods.
+PAGE_METHODS = ("tasks/get", "tasks/update", "tasks/cancel")
+
+
 def lifecycle(method, params):
     described = {
         "capabilities": {"tools": {}},
@@ -477,9 +493,13 @@ def handle(line):
     if not isinstance(message, dict) or not isinstance(message.get("method"), str):
         known_id = message.get("id") if isinstance(message, dict) and isinstance(message.get("id"), (str, int)) and not isinstance(message.get("id"), bool) else None
         return {"jsonrpc": "2.0", "id": known_id, "error": {"code": -32600, "message": "invalid request"}}
-    if "id" not in message:
-        return None  # a notification
     method = message["method"]
+    if "id" not in message:
+        # A notification gets no reply. The page acts on a cancellation of a call it is running.
+        tab = RELAY.current()
+        if method == "notifications/cancelled" and tab is not None:
+            RELAY.tell(tab, message)
+        return None
     params = message.get("params") if isinstance(message.get("params"), dict) else {}
     if name := client_name(params):
         RELAY.client = name[:64]
@@ -488,11 +508,14 @@ def handle(line):
         if (result := lifecycle(method, params)) is not None:
             tab = RELAY.current()
             if "instructions" in result and tab is not None:
-                # The page's own instructions say what it has loaded.
-                own = RELAY.ask(tab, {**message, "params": params}, timeout=5)
-                instructions = ((own or {}).get("result") or {}).get("instructions")
-                if isinstance(instructions, str):
-                    result["instructions"] = instructions
+                # The page's own instructions say what it has loaded, and its extensions what it speaks
+                # beyond the core protocol (MCP Tasks): only the page can honour those.
+                own = ((RELAY.ask(tab, {**message, "params": params}, timeout=5) or {}).get("result")) or {}
+                if isinstance(own.get("instructions"), str):
+                    result["instructions"] = own["instructions"]
+                extensions = (own.get("capabilities") or {}).get("extensions")
+                if isinstance(extensions, dict) and extensions:
+                    result["capabilities"] = {**result["capabilities"], "extensions": extensions}
             reply["result"] = result
         elif method == "tools/list":
             reply["result"] = {"tools": list_tools()}
@@ -500,6 +523,13 @@ def handle(line):
             reply["result"] = call_tool(message, params)
         elif method == "tools/call":
             reply = {"jsonrpc": "2.0", "id": message["id"], "error": {"code": -32602, "message": "tools/call needs a string name"}}
+        elif method in PAGE_METHODS:
+            tab = RELAY.current()
+            answered = RELAY.ask(tab, message, timeout=10) if tab is not None else None
+            if isinstance(answered, dict) and ("result" in answered or "error" in answered):
+                reply = {**answered, "id": message["id"]}
+            else:
+                reply = {"jsonrpc": "2.0", "id": message["id"], "error": {"code": -32603, "message": "no PlotJuggler page answered"}}
         else:
             reply = {"jsonrpc": "2.0", "id": message["id"], "error": {"code": -32601, "message": "method not found"}}
     except Exception as e:  # noqa: BLE001 - one bad call must not end the session
