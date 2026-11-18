@@ -77,7 +77,10 @@ built a series on yours, since it would go too: tell the user instead of working
   fields of one message always share timestamps.
 - `add_script_series`: the same in Luau **or Python**.
 - `add_filter`: one of the built-in filters (derivative, integral, moving average, ...).
-- `create_markers`: threshold or rule markers on the timeline.
+- `create_markers`: markers on the timeline. Write the rule as `when(series, condition)` calls,
+  not loops: `when("/speed", above(2)):backgroundColor("red")` shades while it holds,
+  `:event()` / `:verticalLine()` mark where it starts, `when("/mode"):backgroundColor({...})`
+  colors by value. Its tool description lists the conditions; a loop only for windows or state.
 - `create_derived_object`: live object (recomputes with the playhead), or `pin_at_s` to freeze one
   instant as a finding.
 
