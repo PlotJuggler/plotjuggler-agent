@@ -27,7 +27,16 @@
       "tool_timeout_sec": 900,
       "default_tools_approval_mode": "approve",
       "tools": {
+        "add_script_series": {
+          "approval_mode": "prompt"
+        },
         "export_series": {
+          "approval_mode": "prompt"
+        },
+        "set_widget_state": {
+          "approval_mode": "prompt"
+        },
+        "start_stream": {
           "approval_mode": "prompt"
         },
         "unload_file": {
