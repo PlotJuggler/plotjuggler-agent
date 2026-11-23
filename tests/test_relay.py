@@ -42,6 +42,7 @@ class RelayTest(unittest.TestCase):
         )
         self.relay.stderr.readline()  # "listening ..."
         self.next_id = 0
+        self.notifications = []
         self.rpc("initialize", {"protocolVersion": "2025-06-18", "clientInfo": {"name": "test-client"}})
 
     def tearDown(self):
@@ -57,7 +58,8 @@ class RelayTest(unittest.TestCase):
         self.next_id += 1
         self.relay.stdin.write(json.dumps({"jsonrpc": "2.0", "id": self.next_id, "method": method, "params": params or {}}) + "\n")
         self.relay.stdin.flush()
-        reply = json.loads(self.relay.stdout.readline())
+        while "id" not in (reply := json.loads(self.relay.stdout.readline())):
+            self.notifications.append(reply)
         self.assertEqual(reply["id"], self.next_id)
         return reply
 
@@ -86,20 +88,27 @@ class RelayTest(unittest.TestCase):
             e.close()
             return e.code, None, e.headers
 
-    def hello(self, key=KEY):
-        status, body, _ = self.http("POST", "/link/hello", {"title": "PlotJuggler", "protocol": 1}, link=key)
+    def hello(self, key=KEY, tools=None, browser=None):
+        """A page joins and answers the tools/list the relay asks every page that links."""
+        hello = {"title": "PlotJuggler", "protocol": 1, **({} if browser is None else {"browser": browser})}
+        status, body, _ = self.http("POST", "/link/hello", hello, link=key)
         self.assertEqual(status, 200)
+        bundled = json.loads((RELAY.parent / "browser-tools.json").read_text())
+        item = self.serve_once(body["id"], lambda m: {"tools": bundled if tools is None else tools}, link=key)
+        self.assertEqual(item["message"]["method"], "tools/list")
         return body["id"]
 
-    def serve_once(self, tab, answer):
+    def serve_once(self, tab, answer, link=KEY):
         """Polls until a message arrives, replies with answer(message) as its result, returns the message."""
         while True:
-            status, item, _ = self.http("GET", f"/link/next?id={tab}")
+            status, item, _ = self.http("GET", f"/link/next?id={tab}", link=link)
             if status == 200:
                 break
             self.assertEqual(status, 204)
         response = {"jsonrpc": "2.0", "id": item["message"]["id"], "result": answer(item["message"])}
-        self.assertEqual(self.http("POST", f"/link/reply?id={tab}", {"seq": item["seq"], "response": response})[0], 204)
+        self.assertEqual(
+            self.http("POST", f"/link/reply?id={tab}", {"seq": item["seq"], "response": response}, link=link)[0], 204
+        )
         return item
 
     # --- tests ---
@@ -165,7 +174,7 @@ class RelayTest(unittest.TestCase):
         thread.start()
         self.serve_once(tab, lambda m: {"instructions": "loaded: x", "capabilities": {"tools": {}, "extensions": tasks}})
         thread.join(10)
-        self.assertEqual(box["reply"]["result"]["capabilities"], {"tools": {}, "extensions": tasks})
+        self.assertEqual(box["reply"]["result"]["capabilities"], {"tools": {"listChanged": True}, "extensions": tasks})
         self.assertEqual(box["reply"]["result"]["instructions"], "loaded: x")
 
         params = {"taskId": "abc", "_meta": {"io.modelcontextprotocol/clientCapabilities": {"extensions": tasks}}}
@@ -236,6 +245,7 @@ class RelayTest(unittest.TestCase):
                                       stderr=subprocess.PIPE, env=env, text=True)
         self.relay.stderr.readline()
         self.next_id = 0
+        self.notifications = []
         self.rpc("initialize", {"protocolVersion": "2025-06-18", "clientInfo": {"name": "test-client"}})
 
     def test_launch_hands_the_page_the_kept_secret_and_keeps_the_browser_off_stdout(self):
@@ -269,6 +279,28 @@ class RelayTest(unittest.TestCase):
         self.assertFalse(box["result"].get("isError"), box)
         self.restart_without_test_key(keep.name)  # a restarted relay still knows the open tab's key
         self.assertEqual(self.http("POST", "/link/hello", {"title": "PlotJuggler"}, link=key)[0], 200)
+
+    def test_a_linking_page_refreshes_the_tool_list_and_the_client_hears_it_changed(self):
+        listed = {t["name"] for t in self.rpc("tools/list")["result"]["tools"]}
+        self.assertNotIn("brand_new_tool", listed)
+        tools = [{"name": "brand_new_tool", "description": "x", "inputSchema": {"type": "object"}}]
+        self.hello(tools=tools, browser=True)
+        changed = json.loads(self.relay.stdout.readline())
+        self.assertEqual(changed, {"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
+        cached = Path(self.cache.name) / "plotjuggler-agent" / "browser-tools.json"
+        self.assertEqual(json.loads(cached.read_text()), tools)
+        initialize = self.rpc("initialize", {"protocolVersion": "2025-06-18"})
+        self.assertTrue(initialize["result"]["capabilities"]["tools"]["listChanged"])
+
+    def test_the_relays_own_tools_carry_a_title_and_the_four_hints(self):
+        tools = {t["name"]: t for t in self.rpc("tools/list")["result"]["tools"]}
+        for name in ("list_instances", "select_instance", "launch"):
+            hints = tools[name]["annotations"]
+            self.assertTrue(tools[name]["title"], name)
+            self.assertEqual(hints["title"], tools[name]["title"])
+            for hint in ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"):
+                self.assertIsInstance(hints[hint], bool, (name, hint))
+        self.assertTrue(tools["select_instance"]["inputSchema"]["properties"]["id"]["description"])
 
     def test_a_page_the_relay_does_not_know_is_told_to_say_hello(self):
         self.assertEqual(self.http("GET", "/link/next?id=nope")[0], 404)

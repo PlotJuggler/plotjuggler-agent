@@ -116,6 +116,7 @@ class Relay:
         self.files = {}  # token -> path
         self.base = ""
         self.joined = threading.Condition(self.lock)
+        self.served = None  # the page tools the client was last given (RELAY_TOOLS aside), None before it asked
 
     # --- the page side -------------------------------------------------------------------------
 
@@ -125,6 +126,7 @@ class Relay:
             self.tabs[tab_id] = Tab(str(title)[:200], browser is True)
             self.joined.notify_all()
         log("page joined:", tab_id)
+        threading.Thread(target=refresh_tools, args=(tab_id,), daemon=True).start()
         return tab_id
 
     def next_for(self, tab_id):
@@ -316,19 +318,37 @@ class PageHandler(BaseHTTPRequestHandler):
 
 # --- MCP over stdio ---------------------------------------------------------------------------------
 
+def hints(title, read_only, destructive, idempotent, open_world):
+    """MCP annotations, as PlotJuggler's mcp::toolHints gives the desktop bridge's tools of the same name."""
+    return {
+        "title": title,
+        "annotations": {
+            "title": title,
+            "readOnlyHint": read_only,
+            "destructiveHint": destructive,
+            "idempotentHint": idempotent,
+            "openWorldHint": open_world,
+        },
+    }
+
+
 RELAY_TOOLS = [
     {
         "name": "list_instances",
         "description": "PlotJuggler pages open in the user's web browser and connected to this session: id, title, "
         "whether this session uses it. Only needed when several are open.",
         "inputSchema": {"type": "object", "properties": {}, "required": []},
-        "annotations": {"readOnlyHint": True, "openWorldHint": False},
+        **hints("List PlotJuggler windows", True, False, True, False),
     },
     {
         "name": "select_instance",
         "description": "Use the PlotJuggler page with this id (from list_instances) for every later call.",
-        "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]},
-        "annotations": {"readOnlyHint": False, "openWorldHint": False},
+        "inputSchema": {
+            "type": "object",
+            "properties": {"id": {"type": "string", "description": "a page id from list_instances"}},
+            "required": ["id"],
+        },
+        **hints("Select a PlotJuggler window", False, False, True, False),
     },
     {
         "name": "launch",
@@ -336,7 +356,7 @@ RELAY_TOOLS = [
         "and use it. Returns once the page is ready (the first load can take a minute). Ask the user first: "
         "it opens a new browser tab.",
         "inputSchema": {"type": "object", "properties": {}, "required": []},
-        "annotations": {"readOnlyHint": False, "openWorldHint": False},
+        **hints("Launch PlotJuggler", False, False, False, False),
     },
 ]
 
@@ -367,7 +387,7 @@ PAGE_METHODS = ("tasks/get", "tasks/update", "tasks/cancel")
 
 def lifecycle(method, params):
     described = {
-        "capabilities": {"tools": {}},
+        "capabilities": {"tools": {"listChanged": True}},
         "serverInfo": {"name": "plotjuggler", "title": "PlotJuggler (browser)", "version": VERSION},
         "instructions": INSTRUCTIONS,
     }
@@ -400,17 +420,36 @@ def remember_tools(tools):
         pass
 
 
+def ask_tools(tab):
+    """The tool list page `tab` gives, kept for later sessions when it is the browser build's; None if it gave none."""
+    response = RELAY.ask(tab, {"jsonrpc": "2.0", "id": 0, "method": "tools/list", "params": {}}, timeout=10)
+    tools = ((response or {}).get("result") or {}).get("tools")
+    if not isinstance(tools, list):
+        return None
+    page = RELAY.live_tabs().get(tab)
+    if page is not None and page.browser:  # a desktop --mcp-relay window lists desktop-only tools
+        remember_tools(tools)
+    return tools
+
+
 def list_tools():
     tab = RELAY.current()
-    if tab is not None:
-        response = RELAY.ask(tab, {"jsonrpc": "2.0", "id": 0, "method": "tools/list", "params": {}}, timeout=10)
-        tools = ((response or {}).get("result") or {}).get("tools")
-        if isinstance(tools, list):
-            page = RELAY.live_tabs().get(tab)
-            if page is not None and page.browser:  # a desktop --mcp-relay window lists desktop-only tools
-                remember_tools(tools)
-            return tools + RELAY_TOOLS
-    return page_tools() + RELAY_TOOLS
+    tools = ask_tools(tab) if tab is not None else None
+    tools = page_tools() if tools is None else tools
+    RELAY.served = tools
+    return tools + RELAY_TOOLS
+
+
+def refresh_tools(tab):
+    """A page that links may be a newer build than the list the client holds: ask it, and tell the client when its
+    tools changed (it then lists them again)."""
+    tools = ask_tools(tab)
+    if tools is None or RELAY.served is None or tools == RELAY.served or RELAY.current() != tab:
+        return
+    RELAY.served = tools
+    with OUT_LOCK:
+        MCP_OUT.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"}) + "\n")
+        MCP_OUT.flush()
 
 
 def launch():

@@ -36,6 +36,9 @@
         "set_widget_state": {
           "approval_mode": "prompt"
         },
+        "start_stream": {
+          "approval_mode": "prompt"
+        },
         "unload_file": {
           "approval_mode": "prompt"
         }
