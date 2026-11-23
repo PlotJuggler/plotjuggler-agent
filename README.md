@@ -42,7 +42,8 @@ the default install folders.
 
 Codex starts MCP servers with a stripped environment; `.codex-mcp.json` forwards the display and
 per-user folder variables PlotJuggler needs, and pre-approves the tools except `export_series` (writes
-a file) and `unload_file` (drops the user's data).
+a file), `unload_file` (drops the user's data), `add_script_series` (runs your agent's Python inside
+PlotJuggler and saves it in layouts) and `set_widget_state` (changes the user's docks).
 
 **Windows is untested.** Both MCP configs name the extension-less `bin/plotjuggler-mcp`; Codex is
 expected to resolve its `.cmd` twin (OpenAI's own plugins rely on that), Claude Code may not. If the
