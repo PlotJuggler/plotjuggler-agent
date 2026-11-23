@@ -75,7 +75,10 @@ built a series on yours, since it would go too: tell the user instead of working
 - `create_derived_series`: a live Luau transform over one or more inputs. Several inputs join on
   equal timestamps, so inputs that share none (different messages at different rates) are refused;
   fields of one message always share timestamps.
-- `add_script_series`: the same in Luau **or Python**.
+  When its schema offers `output_type`, `"string"` makes a text series (each sample returns a
+  label such as "walking", nil skips it): shown as coloured states in a State Transitions panel,
+  not plotted, and refused by `read_series`/`export_series`. Never feed a text series into a formula: it reads as 0.
+- `add_script_series`: the same in Luau **or Python**; a class with `output = "string"` returns text.
 - `add_filter`: one of the built-in filters (derivative, integral, moving average, ...).
 - `create_markers`: threshold or rule markers on the timeline.
 - `create_derived_object`: live object (recomputes with the playhead), or `pin_at_s` to freeze one
