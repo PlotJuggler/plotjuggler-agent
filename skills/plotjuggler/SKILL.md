@@ -9,17 +9,19 @@ PlotJuggler runs on the user's desktop, or in their web browser when the desktop
 `plotjuggler` MCP tools act on that window or page. The user sees everything you create, so work in their app instead
 of decoding files or plotting with your own scripts. Your training describes PlotJuggler 3; do not answer from it.
 
-## Read PlotJuggler's own guide
+## Read the guide for the running PlotJuggler
 
-PlotJuggler serves its guide itself, written for the version that is running: the workflow, the scripting languages,
-which plugin reads which format, and the UI steps for each task. Read it before working with the data:
+Once PlotJuggler answers (see below), read the guide that matches it before working with the data: the workflow, the
+scripting languages, which plugin reads which format, and the UI steps for each task.
 
-- When your client lists MCP skills, it is the `plotjuggler` server's `plotjuggler` skill (in Claude Code
-  `plugin_plotjuggler_plotjuggler:plotjuggler`): use it.
-- Otherwise read the resource `skill://plotjuggler/SKILL.md` from the `plotjuggler` server, and the pages it links
-  (same folder, e.g. `skill://plotjuggler/scripting.md`) when a task needs them.
-- A PlotJuggler without that resource is older than the guide: follow the server's instructions and the tools' own
-  descriptions.
+- **PlotJuggler serves its own guide** (newer than 4.2.0), written for the version that is running. When your client
+  lists MCP skills, it is the `plotjuggler` server's `plotjuggler` skill (in Claude Code
+  `plugin_plotjuggler_plotjuggler:plotjuggler`): use it. Otherwise read the resource `skill://plotjuggler/SKILL.md`
+  from the `plotjuggler` server, and the pages it links (same folder, e.g. `skill://plotjuggler/scripting.md`) when a
+  task needs them.
+- **It does not** (PlotJuggler 4.2.0 and older: the server lists no `skill://plotjuggler/SKILL.md` resource, or
+  reading it fails): read [legacy-guide.md](legacy-guide.md), beside this file, instead. Decide by whether the
+  resource is there, not by the version number: a development build can report a released version.
 
 ## Before PlotJuggler answers
 
@@ -30,7 +32,7 @@ which plugin reads which format, and the UI steps for each task. Read it before 
    it). In the browser:
    - Chrome, Edge or Firefox. The browser may ask to let the page reach this computer (local network access): tell
      the user to allow it, the page talks only to this session's relay on 127.0.0.1.
-   - The guide is served by the page: read it once `launch` has returned.
+   - The guide is served by the page: look for it once `launch` has returned.
 1. `list_instances`. None running: `launch` (it starts PlotJuggler and waits). Several: ask the user which one, then
    `select_instance`. A window the user started is listed unless they turned agent access off (Preferences →
    Appearance); then ask them to turn it on, or `launch` a separate one.

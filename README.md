@@ -6,15 +6,15 @@ markers, plot in their own tabs, show 3D/2D scenes, take screenshots. One plugin
 declaration and a short skill that gets the agent connected. The guide to using PlotJuggler well (workflow, scripting
 languages, formats, UI steps) is served by PlotJuggler itself, as an MCP skill and as `skill://plotjuggler/...`
 resources, so it always matches the version running; it lives in
-[PlotJuggler's `docs/agents/`](https://github.com/PlotJuggler/PlotJuggler/tree/main/docs/agents).
+[PlotJuggler's `docs/agents/`](https://github.com/PlotJuggler/PlotJuggler/tree/main/docs/agents). For PlotJuggler
+4.2.0 and older, which do not serve it, the skill carries the guide those versions were written against
+(`skills/plotjuggler/legacy-guide.md`); the agent picks it when the server has no guide of its own.
 
 ## Install
 
 Either PlotJuggler 4.2 or newer on the desktop, which has the MCP server (`plotjuggler4 --mcp-bridge`),
 or nothing but `python3`: without a desktop install the plugin runs PlotJuggler in your browser (see
-[Browser mode](#browser-mode)), and the agent asks which you prefer. Until 4.2
-is released, use a build of the [`main-4.x`](https://github.com/PlotJuggler/PlotJuggler/tree/main-4.x)
-branch. Install it and start it once: that is how the plugin finds it (or set `PLOTJUGGLER4` to the
+[Browser mode](#browser-mode)), and the agent asks which you prefer. Install it and start it once: that is how the plugin finds it (or set `PLOTJUGGLER4` to the
 executable). Agent access is on by default; Preferences → Appearance → "Let AI agents control
 PlotJuggler (MCP server)" turns it off.
 
