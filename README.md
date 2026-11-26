@@ -3,15 +3,18 @@
 Lets Claude Code and Codex drive PlotJuggler 4 on your desktop, or in your web browser when the
 desktop app is not installed: open logs, read and compute over signals, create derived series and
 markers, plot in their own tabs, show 3D/2D scenes, take screenshots. One plugin carries the MCP server
-declaration and a skill that teaches the agent the workflow.
+declaration and a short skill that gets the agent connected. The guide to using PlotJuggler well (workflow, scripting
+languages, formats, UI steps) is served by PlotJuggler itself, as an MCP skill and as `skill://plotjuggler/...`
+resources, so it always matches the version running; it lives in
+[PlotJuggler's `docs/agents/`](https://github.com/PlotJuggler/PlotJuggler/tree/main/docs/agents). For PlotJuggler
+4.2.0 and older, which do not serve it, the skill carries the guide those versions were written against
+(`skills/plotjuggler/legacy-guide.md`); the agent picks it when the server has no guide of its own.
 
 ## Install
 
 Either PlotJuggler 4.2 or newer on the desktop, which has the MCP server (`plotjuggler4 --mcp-bridge`),
 or nothing but `python3`: without a desktop install the plugin runs PlotJuggler in your browser (see
-[Browser mode](#browser-mode)), and the agent asks which you prefer. Until 4.2
-is released, use a build of the [`main-4.x`](https://github.com/PlotJuggler/PlotJuggler/tree/main-4.x)
-branch. Install it and start it once: that is how the plugin finds it (or set `PLOTJUGGLER4` to the
+[Browser mode](#browser-mode)), and the agent asks which you prefer. Install it and start it once: that is how the plugin finds it (or set `PLOTJUGGLER4` to the
 executable). Agent access is on by default; Preferences → Appearance → "Let AI agents control
 PlotJuggler (MCP server)" turns it off.
 
@@ -74,7 +77,8 @@ default `https://app.plotjuggler.io/`); add others, such as a local server, with
 Use Chrome, Edge or Firefox; the first time, the browser may ask whether the page may access devices on
 your local network: allow it. `export_series` and `about` are desktop only.
 
-`relay/browser-tools.json` is the tool list served before a page connects (MCP clients read it once, at
+The relay passes the page's guide (the `skills/*` and `resources/*` methods) and MCP Tasks through once a page has
+connected. `relay/browser-tools.json` is the tool list served before a page connects (MCP clients read it once, at
 startup); once a page connects the relay caches the page's own list for the next sessions. Regenerate it
 from a PlotJuggler build:
 

@@ -197,9 +197,38 @@ class RelayTest(unittest.TestCase):
         thread.join(10)
         self.assertEqual(box["reply"]["error"]["code"], -32602)
 
+    def test_the_pages_skill_and_its_resources_pass_through(self):
+        tab = self.hello()
+        skills = {"io.modelcontextprotocol/skills": {}}
+        box = {}
+        thread = threading.Thread(target=lambda: box.update(reply=self.rpc("server/discover", {})))
+        thread.start()
+        self.serve_once(tab, lambda m: {"capabilities": {"tools": {}, "resources": {}, "extensions": skills}})
+        thread.join(10)
+        capabilities = box["reply"]["result"]["capabilities"]
+        self.assertEqual(capabilities["extensions"], skills)
+        self.assertEqual(capabilities["resources"], {})
+
+        entry = {"uri": "skill://plotjuggler/SKILL.md", "frontmatter": {"name": "plotjuggler", "description": "d"},
+                 "resources": []}
+        for method, params, answer in (
+            ("skills/list", {}, {"skills": [entry], "ttlMs": 0, "cacheScope": "public"}),
+            ("resources/read", {"uri": entry["uri"]}, {"contents": [{"uri": entry["uri"], "text": "---"}]}),
+        ):
+            thread = threading.Thread(target=lambda: box.update(reply=self.rpc(method, params)))
+            thread.start()
+            item = self.serve_once(tab, lambda m: answer)
+            thread.join(10)
+            self.assertEqual(item["message"]["method"], method)
+            self.assertEqual(item["message"]["params"], params)
+            self.assertEqual(box["reply"]["result"], answer)
+
     def test_without_a_page_the_tasks_methods_are_refused_and_no_extension_is_offered(self):
-        self.assertNotIn("extensions", self.rpc("server/discover", {})["result"]["capabilities"])
+        capabilities = self.rpc("server/discover", {})["result"]["capabilities"]
+        self.assertNotIn("extensions", capabilities)
+        self.assertNotIn("resources", capabilities)
         self.assertEqual(self.rpc("tasks/get", {"taskId": "abc"})["error"]["code"], -32603)
+        self.assertEqual(self.rpc("skills/list", {})["error"]["code"], -32603)
 
     def test_open_file_hands_the_page_a_url_it_can_download(self):
         tab = self.hello()

@@ -35,7 +35,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-VERSION = "0.4.1"
+VERSION = "0.5.0"
 WASM_URL = os.environ.get("PJ_WASM_URL", "https://app.plotjuggler.io/")
 POLL_S = 20  # a page's poll is held this long when there is nothing to send
 LIVE_S = 120  # a page that has not polled for this long is gone (closed tab, or a page frozen that long)
@@ -381,8 +381,12 @@ def client_name(params):
     return info.get("name", "") if isinstance(info, dict) else ""
 
 
-# Passed on to the page whole, answers and errors included: the MCP Tasks extension's methods.
-PAGE_METHODS = ("tasks/get", "tasks/update", "tasks/cancel")
+# Passed on to the page whole, answers and errors included: the methods of the extensions the page offers. MCP Tasks,
+# and Skills: PlotJuggler serves its own guide, whose files are resources.
+PAGE_METHODS = (
+    "tasks/get", "tasks/update", "tasks/cancel",
+    "skills/list", "skills/get", "resources/list", "resources/templates/list", "resources/read",
+)
 
 
 def lifecycle(method, params):
@@ -548,13 +552,17 @@ def handle(line):
             tab = RELAY.current()
             if "instructions" in result and tab is not None:
                 # The page's own instructions say what it has loaded, and its extensions what it speaks
-                # beyond the core protocol (MCP Tasks): only the page can honour those.
+                # beyond the core protocol (MCP Tasks, Skills and the resources they read): only the page can
+                # honour those.
                 own = ((RELAY.ask(tab, {**message, "params": params}, timeout=5) or {}).get("result")) or {}
                 if isinstance(own.get("instructions"), str):
                     result["instructions"] = own["instructions"]
-                extensions = (own.get("capabilities") or {}).get("extensions")
+                capabilities = own.get("capabilities") or {}
+                extensions = capabilities.get("extensions")
                 if isinstance(extensions, dict) and extensions:
                     result["capabilities"] = {**result["capabilities"], "extensions": extensions}
+                if isinstance(capabilities.get("resources"), dict):
+                    result["capabilities"] = {**result["capabilities"], "resources": capabilities["resources"]}
             reply["result"] = result
         elif method == "tools/list":
             reply["result"] = {"tools": list_tools()}
