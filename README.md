@@ -3,7 +3,10 @@
 Lets Claude Code and Codex drive PlotJuggler 4 on your desktop, or in your web browser when the
 desktop app is not installed: open logs, read and compute over signals, create derived series and
 markers, plot in their own tabs, show 3D/2D scenes, take screenshots. One plugin carries the MCP server
-declaration and a skill that teaches the agent the workflow.
+declaration and a short skill that gets the agent connected. The guide to using PlotJuggler well (workflow, scripting
+languages, formats, UI steps) is served by PlotJuggler itself, as an MCP skill and as `skill://plotjuggler/...`
+resources, so it always matches the version running; it lives in
+[PlotJuggler's `docs/agents/`](https://github.com/PlotJuggler/PlotJuggler/tree/main/docs/agents).
 
 ## Install
 
@@ -74,7 +77,8 @@ default `https://app.plotjuggler.io/`); add others, such as a local server, with
 Use Chrome, Edge or Firefox; the first time, the browser may ask whether the page may access devices on
 your local network: allow it. `export_series` and `about` are desktop only.
 
-`relay/browser-tools.json` is the tool list served before a page connects (MCP clients read it once, at
+The relay passes the page's guide (the `skills/*` and `resources/*` methods) and MCP Tasks through once a page has
+connected. `relay/browser-tools.json` is the tool list served before a page connects (MCP clients read it once, at
 startup); once a page connects the relay caches the page's own list for the next sessions. Regenerate it
 from a PlotJuggler build:
 
